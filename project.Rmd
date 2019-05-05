@@ -1,0 +1,104 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Niccolò Rocco"
+date: "May 5, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data set creation
+I load the training data set and I observe it has 19622 rows and 160 columns. I remove all the variables that have many NAs values or blank values. I remove also the first seven variables because they do not refer to quantitative sensor measurements, but to person, time stamps and capture windows. To do this cleaning, I use the `count_na_blank` vector. The `new_data` data set has 59 columns.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+data<-read.csv("pml-training.csv")
+count_na_blank<-vector(length=dim(data)[2])
+for (i in 1:dim(data)[2] ){
+ count_na_blank[i]<-length((which  ( is.na(data[,i]) | data[,i]==""    )))
+}
+#I observe that many columns have 19216 Nas or blannk values. I remove these and the first 7 columns
+count_na_blank[1:7]<-1 
+new_data<-data[,which(count_na_blank==0)]
+```
+
+
+## Training and Test samples
+I load the caret package and I build the training and the test sets, with the createDataPartition function having p=0.7. 
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(caret)
+set.seed(3456)
+inTrain<-createDataPartition(y=new_data$classe,p=0.7,list=FALSE)
+training<-new_data[inTrain,]
+testing<-new_data[-inTrain,]
+```
+
+## Fitting
+I have to predict a qualitative variable, that is the "classe". So, I believe that a good choice is predicting with trees. I tried a general recursive partitioning, method *rpart*, but the accuracy was bad (between 0.5 and 0.6). So, I fit a Random Forest. Because of the long time requested to fit that method on my pc, I choose to do a *parallel computing*. I impose to making clusters leaving one core to the operating system, and I set the Train Control to cross validation. I have to load the libraries *parallel* and *doParallel* to do the parallel computing.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+x<-training[,-53]
+y <- training[,53]
+library(parallel)
+library(doParallel)
+
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+set.seed(54646)
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+
+set.seed(3112)
+fit <- train(x,y, method="rf",data=new_data,trControl = fitControl)
+#I stop the paralleling method 
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+
+##Results 
+I notice that the method accuracy is very high (about 0.99). From Var Importance plot, I deduce the importance variable. The first variables is roll_belt. 
+
+```
+confusionMatrix.train(fit) #accuracy very
+plot(varImp(fit),top=10)
+p<-ggplot(training, aes(x=roll_belt, y=yaw_belt, color=classe))
+p+geom_point()
+```
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+confusionMatrix.train(fit) #accuracy very high
+plot(varImp(fit),top=10)
+```
+
+In the below figure, I plot the two most important variables, colored by the classe variable (the one to predict) and I can see specif patterns, indeed the two variables explain a good percentage of the classe variable.
+
+```{r echo=TRUE}
+p<-ggplot(training, aes(x=roll_belt, y=yaw_belt, color=classe))
+p+geom_point()
+```
+
+I predict the classe variable also in the testing set and the acccuracy is high (about 0.99). Se the model is satisfying.
+
+```{r echo=TRUE}
+test_prediction<-predict(fit,newdata=testing)
+confusionMatrix(test_prediction , testing$classe) #accuracy very high
+```
+
+## Prediction
+I predict the classe variable for the 20 observations in the "pml-testing.csv" file. On the data set, I do the operations done upper to the training (removed NAs, blanks and first seven varaibles). Also, I do a simple trick to have the same training variables format.
+
+```{r echo=TRUE, warning=FALSE}
+data_to_test<-read.csv("pml-testing.csv")
+data_to_test_new<-data_to_test[,which(count_na_blank==0)]
+names(data_to_test_new)[53]<-"classe"
+data_to_test_new <- rbind(training[1, ] , data_to_test_new)
+data_to_test_new <- data_to_test_new[-1,]
+data_to_test_prediction<-predict(fit,newdata=data_to_test_new)
+data_to_test_prediction
+```
